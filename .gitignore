@@ -6,3 +6,5 @@ __pycache__/
 .env
 .streamlit/secrets.toml
 reconciliation_notes.md
+venv-agents/
+workspace/

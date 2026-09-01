@@ -1,0 +1,27 @@
+# Agent framework templates. Install what you need -- the four templates are
+# independent and none imports another.
+#
+# Verified together in one environment (see agents/README.md for the pins that
+# force a version, notably autogen[anthropic] holding anthropic below 1.0).
+
+# Shared: provider SDKs
+anthropic>=0.120,<1.0        # <1.0 is required by autogen[anthropic]
+openai>=2.30,<3.0            # <3.0 is required by crewai
+
+# 1. LangGraph
+langgraph>=1.0
+langchain-core>=1.0
+langchain-anthropic>=1.0
+langchain-openai>=1.0
+
+# 2. CrewAI
+crewai>=1.0
+
+# 3. AutoGen -- the `autogen` distribution, NOT `ag2` (see README)
+autogen[anthropic,openai]>=0.14
+
+# 4. Native loops need only the two SDKs above.
+
+# Tool backend (shared ledger reconciliation) and tests
+pandas>=2.0
+pytest>=8.0
