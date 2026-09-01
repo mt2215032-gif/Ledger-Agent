@@ -18,11 +18,17 @@ from typing import Any
 
 from autogen import AssistantAgent, UserProxyAgent
 
-from agents.provider import CLAUDE, get_provider, require_key
+from agents.provider import REGISTRY, get_provider, require_key
 from agents.tools import execute_project_query
 
-# AutoGen's api_type strings per provider.
-API_TYPE = {CLAUDE: "anthropic", "openai": "openai"}
+#: AutoGen api_type per provider, from the registry. AutoGen ships clients for
+#: anthropic, openai, google, ollama, groq, together, mistral, deepseek and
+#: cerebras, so every registered provider is reachable here.
+API_TYPE = {k: p.autogen_api_type for k, p in REGISTRY.items()}
+
+
+class ProviderUnsupportedError(RuntimeError):
+    """Raised when AutoGen has no client for the selected provider."""
 
 SYSTEM_MESSAGE = (
     "You are a ledger analyst. Use the execute_project_query tool to retrieve "
@@ -38,17 +44,17 @@ def build_llm_config(
 ) -> dict[str, Any]:
     """Build AutoGen's llm_config for the active provider."""
     config = get_provider(provider, model)
+    api_type = config.provider.autogen_api_type
+    if api_type is None:
+        raise ProviderUnsupportedError(
+            f"AutoGen has no client for {config.provider.label}."
+        )
     require_key(config)
-    return {
-        "config_list": [
-            {
-                "model": config.model,
-                "api_key": config.api_key,
-                "api_type": API_TYPE[config.name],
-            }
-        ],
-        "temperature": temperature,
-    }
+    entry: dict[str, Any] = {"model": config.model, "api_type": api_type}
+    # A keyless local runtime (Ollama) must not send an api_key field.
+    if config.api_key:
+        entry["api_key"] = config.api_key
+    return {"config_list": [entry], "temperature": temperature}
 
 
 def build_agents(

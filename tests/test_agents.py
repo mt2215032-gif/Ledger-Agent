@@ -23,9 +23,11 @@ from agents.native_loop import (
 )
 from agents.provider import (
     DEFAULT_MODELS,
+    REGISTRY,
     MissingAPIKeyError,
     get_chat_model,
     get_provider,
+    list_providers,
 )
 
 
@@ -57,13 +59,62 @@ def test_provider_switches_from_the_environment(monkeypatch):
 
 def test_unknown_provider_is_rejected():
     with pytest.raises(ValueError, match="Unknown provider"):
-        get_provider("gemini")
+        get_provider("no-such-provider")
 
 
 def test_missing_key_raises_before_any_network_call(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     with pytest.raises(MissingAPIKeyError, match="ANTHROPIC_API_KEY"):
         get_chat_model("claude")
+
+
+# ------------------------------------------------------------- registry
+
+
+def test_both_proprietary_and_open_weight_sources_are_registered():
+    assert list_providers(open_weights=False)  # claude, openai, gemini
+    assert list_providers(open_weights=True)   # ollama, groq, together, ...
+    assert len(REGISTRY) == len(list_providers())
+
+
+@pytest.mark.parametrize("key", sorted(REGISTRY))
+def test_every_provider_has_a_usable_langchain_integration(key, monkeypatch):
+    """Each entry must name a real module and class, not a guessed one."""
+    spec = REGISTRY[key]
+    if spec.api_key_env:
+        monkeypatch.setenv(spec.api_key_env, "test-key")
+    model = get_chat_model(key)
+    assert type(model).__name__ == spec.langchain_class
+
+
+@pytest.mark.parametrize("key", sorted(REGISTRY))
+def test_every_provider_declares_framework_routing(key):
+    spec = REGISTRY[key]
+    assert spec.default_model
+    assert spec.pip_package
+    # Claude is the one provider deliberately not routed through an
+    # OpenAI-compatible endpoint; it has a first-class SDK.
+    if key != "claude":
+        assert spec.openai_base_url, f"{key} needs a base_url for the native loop"
+
+
+def test_keyless_local_provider_needs_no_credentials(monkeypatch):
+    """Ollama runs locally, so it is configured without any API key."""
+    monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
+    config = get_provider("ollama")
+    assert config.needs_key is False
+    assert config.configured is True
+    assert config.api_key is None
+
+
+def test_keyed_provider_is_unconfigured_without_its_key(monkeypatch):
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    assert get_provider("groq").configured is False
+
+
+def test_model_override_beats_the_registry_default(monkeypatch):
+    monkeypatch.delenv("MODEL", raising=False)
+    assert get_provider("groq", "mixtral-8x7b").model == "mixtral-8x7b"
 
 
 # ---------------------------------------------------------------- tools
@@ -409,3 +460,48 @@ def test_autogen_tool_executes_against_the_ledger():
     _, proxy = autogen_chat.build_agents(llm_config=AUTOGEN_CONFIG)
     out = json.loads(proxy.function_map[tools.TOOL_NAME](query="totals"))
     assert out["total_debits"] == 700.0
+
+
+# ------------------------------------------- open-weight provider routing
+
+
+def test_claude_is_refused_by_the_openai_compatible_loop():
+    """Routing Claude through an OpenAI-shaped loop would lose its semantics."""
+    with pytest.raises(ValueError, match="run_claude_agent"):
+        run_openai_agent("q", provider="claude")
+
+
+@pytest.mark.parametrize(
+    "provider, expected_host",
+    [
+        ("groq", "api.groq.com"),
+        ("together", "api.together.xyz"),
+        ("mistral", "api.mistral.ai"),
+        ("deepseek", "api.deepseek.com"),
+        ("cerebras", "api.cerebras.ai"),
+        ("ollama", "localhost:11434"),
+    ],
+)
+def test_open_weight_providers_route_to_their_own_endpoint(provider, expected_host):
+    assert expected_host in REGISTRY[provider].openai_base_url
+
+
+def test_open_weight_provider_runs_through_the_shared_loop():
+    """One OpenAI-compatible loop serves every open-weight host."""
+    client = StubOpenAI([_openai_response("stop", content="llama says hi")])
+    result = run_openai_agent("q", client=client, provider="groq")
+    assert result.text == "llama says hi"
+    assert client.requests[0]["model"] == REGISTRY["groq"].default_model
+
+
+def test_autogen_omits_api_key_for_keyless_providers():
+    entry = autogen_chat.build_llm_config("ollama")["config_list"][0]
+    assert entry["api_type"] == "ollama"
+    assert "api_key" not in entry
+
+
+def test_crewai_prefixes_come_from_the_registry(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "x")
+    llm = crewai_team.get_crew_llm("groq")
+    assert REGISTRY["groq"].crewai_prefix == "groq"
+    assert llm is not None

@@ -13,21 +13,34 @@ from typing import Any
 from crewai import Agent, Crew, LLM, Process, Task
 from crewai.tools import tool
 
-from agents.provider import CLAUDE, get_provider, require_key
+from agents.provider import get_provider, require_key
 from agents.tools import execute_project_query
 
-# CrewAI routes through litellm, which wants "<provider>/<model>".
-PROVIDER_PREFIX = {CLAUDE: "anthropic", "openai": "openai"}
+
+class ProviderUnsupportedError(RuntimeError):
+    """Raised when CrewAI has no route to the selected provider."""
 
 
-def get_crew_llm(provider: str | None = None, model: str | None = None, temperature: float = 0.2) -> LLM:
-    """Build a CrewAI LLM for the active provider."""
+def get_crew_llm(
+    provider: str | None = None,
+    model: str | None = None,
+    temperature: float = 0.2,
+) -> LLM:
+    """Build a CrewAI LLM for the active provider.
+
+    CrewAI wants "<prefix>/<model>". Prefixes come from the registry: the
+    natively supported ones (openai, anthropic, gemini, ollama, deepseek,
+    cerebras) work out of the box, while groq, together_ai and mistral are
+    reached through the crewai[litellm] extra.
+    """
     config = get_provider(provider, model)
+    prefix = config.provider.crewai_prefix
+    if prefix is None:
+        raise ProviderUnsupportedError(
+            f"CrewAI has no route to {config.provider.label}."
+        )
     require_key(config)
-    return LLM(
-        model=f"{PROVIDER_PREFIX[config.name]}/{config.model}",
-        temperature=temperature,
-    )
+    return LLM(model=f"{prefix}/{config.model}", temperature=temperature)
 
 
 @tool("Ledger query")

@@ -11,11 +11,24 @@ openai>=2.30,<3.0            # <3.0 is required by crewai
 # 1. LangGraph
 langgraph>=1.0
 langchain-core>=1.0
-langchain-anthropic>=1.0
-langchain-openai>=1.0
+
+# Provider integrations -- install only the sources you use.
+langchain-anthropic>=1.0        # claude
+langchain-openai>=1.0           # openai
+langchain-google-genai>=4.0     # gemini
+langchain-ollama>=1.0           # ollama (local, open weights)
+langchain-groq>=1.0             # groq
+langchain-together>=0.4         # together
+langchain-mistralai>=1.0        # mistral
+langchain-deepseek>=1.0         # deepseek
+langchain-cerebras>=0.8         # cerebras
 
 # 2. CrewAI
 crewai>=1.0
+# Native CrewAI providers: openai, anthropic, gemini, ollama, deepseek,
+# cerebras, bedrock, azure. groq/together/mistral need the litellm extra:
+#   pip install "crewai[litellm]"
+# gemini additionally needs: pip install "crewai[google-genai]"
 
 # 3. AutoGen -- the `autogen` distribution, NOT `ag2` (see README)
 autogen[anthropic,openai]>=0.14

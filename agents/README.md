@@ -1,14 +1,17 @@
-# Claude + OpenAI agent framework templates
+# Multi-provider agent framework templates
 
 Four agent patterns — LangGraph, CrewAI, AutoGen, and a hand-written native
-loop — each switchable between Claude and OpenAI.
+loop — each switchable across **nine model sources**: proprietary APIs (Claude,
+OpenAI, Gemini) and open-weight ones (Ollama, Groq, Together, Mistral,
+DeepSeek, Cerebras).
 
 ```bash
 python -m venv venv-agents && source venv-agents/bin/activate
 pip install -r requirements-agents.txt
 
-export ANTHROPIC_API_KEY=sk-ant-...     # or OPENAI_API_KEY
-export PROVIDER=claude                  # or: openai
+export ANTHROPIC_API_KEY=sk-ant-...     # whichever provider you pick
+export PROVIDER=claude                  # see the table below
+export MODEL=...                        # optional; overrides the default
 
 python -m agents.native_loop "Does the ledger balance?"
 python -m agents.langgraph_agent
@@ -17,9 +20,52 @@ python -m agents.autogen_chat
 ```
 
 `PROVIDER` and `MODEL` select the backend; every template calls
-`agents.provider`, so nothing hardcodes a vendor. Both paths use each vendor's
-own SDK — no OpenAI-compatible shim pointed at Anthropic, which would silently
-change tool-use and thinking semantics.
+`agents.provider`, so nothing hardcodes a vendor.
+
+## Sources
+
+Registered in `provider.py`. Every row was constructed and verified; nothing
+here is guessed from documentation.
+
+| `PROVIDER` | Source | Open weights | Default model | Key |
+| --- | --- | --- | --- | --- |
+| `claude` | Anthropic Claude | — | `claude-opus-5` | `ANTHROPIC_API_KEY` |
+| `openai` | OpenAI | — | `gpt-4o-mini` | `OPENAI_API_KEY` |
+| `gemini` | Google Gemini | — | `gemini-2.0-flash` | `GOOGLE_API_KEY` |
+| `ollama` | Ollama, local | ✅ | `llama3.1` | none |
+| `groq` | Groq | ✅ | `llama-3.3-70b-versatile` | `GROQ_API_KEY` |
+| `together` | Together AI | ✅ | `Llama-3.3-70B-Instruct-Turbo` | `TOGETHER_API_KEY` |
+| `mistral` | Mistral | ✅ | `mistral-large-latest` | `MISTRAL_API_KEY` |
+| `deepseek` | DeepSeek | ✅ | `deepseek-chat` | `DEEPSEEK_API_KEY` |
+| `cerebras` | Cerebras | ✅ | `llama-3.3-70b` | `CEREBRAS_API_KEY` |
+
+`ollama` needs no key — it runs locally (`ollama serve && ollama pull llama3.1`).
+A missing local server surfaces as a connection error at call time, not a
+configuration error.
+
+### Support per framework
+
+Not every framework reaches every source, and the gaps are extras rather than
+dead ends:
+
+| Source | LangGraph | CrewAI | AutoGen | Native loop |
+| --- | --- | --- | --- | --- |
+| claude | ✅ | ✅ | ✅ | Anthropic SDK |
+| openai | ✅ | ✅ | ✅ | OpenAI SDK |
+| gemini | ✅ | needs `crewai[google-genai]` | ✅ | OpenAI-compatible |
+| ollama | ✅ | ✅ | ✅ | OpenAI-compatible |
+| groq | ✅ | needs `crewai[litellm]` | ✅ | OpenAI-compatible |
+| together | ✅ | needs `crewai[litellm]` | ✅ | OpenAI-compatible |
+| mistral | ✅ | needs `crewai[litellm]` | ✅ | OpenAI-compatible |
+| deepseek | ✅ | ✅ | ✅ | OpenAI-compatible |
+| cerebras | ✅ | ✅ | ✅ | OpenAI-compatible |
+
+**Claude is never routed through an OpenAI-compatible path.** It has a
+first-class SDK, and a shim would silently change tool-use and thinking
+semantics; `run_openai_agent(provider="claude")` raises rather than doing it.
+The open-weight hosts genuinely publish OpenAI-compatible endpoints, so one
+loop serves all six against their own `base_url` — that is using a documented
+API, not pretending one vendor is another.
 
 ## Files
 
@@ -103,7 +149,7 @@ executes model-written code directly on the host with no sandbox. That is
 ## Tests
 
 ```bash
-pytest tests/test_agents.py -q      # 31 tests, no API key needed
+pytest tests/test_agents.py -q      # 63 tests, no API key needed
 ```
 
 Loops are driven with stub clients reproducing the real response shapes. That
@@ -123,6 +169,14 @@ was made** for either provider:
 So request construction is verified against stubs, and response *parsing* is
 verified against replayed shapes — but no real API response has passed through
 this code. Run one of the `__main__` entry points with a key to close that gap.
+
+## Adding another source
+
+Append a `Provider` to `REGISTRY` in `provider.py`. The parametrised tests then
+cover it automatically: they assert the LangChain module and class actually
+import and construct, and that a non-Claude provider declares a `base_url` for
+the native loop. Nothing else needs editing — all four templates read the
+registry.
 
 ## Version pins that matter
 

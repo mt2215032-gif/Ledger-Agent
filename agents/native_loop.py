@@ -169,21 +169,40 @@ def run_openai_agent(
     prompt: str,
     *,
     client: Any = None,
+    provider: str | None = None,
     model: str | None = None,
     system: str = SYSTEM_PROMPT,
     max_iterations: int = DEFAULT_MAX_ITERATIONS,
     max_tokens: int = DEFAULT_MAX_TOKENS,
     allow_truncated: bool = False,
 ) -> AgentResult:
-    """Run the equivalent loop against OpenAI chat completions."""
+    """Run the loop against any OpenAI-compatible chat-completions endpoint.
+
+    This covers OpenAI itself and every open-weight host in the registry --
+    Groq, Together, Mistral, DeepSeek, Cerebras and a local Ollama -- each via
+    its own documented OpenAI-compatible `base_url`, so one loop serves them
+    all. Claude is not routed here; it has `run_claude_agent` and its own SDK.
+    """
     import json
 
-    config = get_provider(OPENAI, model)
+    config = get_provider(provider or OPENAI, model)
+    if config.name == CLAUDE:
+        raise ValueError(
+            "Claude does not use the OpenAI-compatible loop; call "
+            "run_claude_agent() so tool-use and thinking semantics are preserved."
+        )
+
     if client is None:
         import openai
 
         require_key(config)
-        client = openai.OpenAI()
+        options: dict[str, Any] = {}
+        if config.provider.openai_base_url:
+            options["base_url"] = config.provider.openai_base_url
+        # The OpenAI SDK requires some api_key string even for a keyless local
+        # runtime such as Ollama, which ignores its value.
+        options["api_key"] = config.api_key or "not-needed"
+        client = openai.OpenAI(**options)
 
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": system},
@@ -242,11 +261,16 @@ def run_openai_agent(
 
 
 def run_agent(prompt: str, provider: str | None = None, **kwargs: Any) -> AgentResult:
-    """Run the native loop for whichever provider is selected."""
+    """Run the native loop for whichever provider is selected.
+
+    Claude goes through the Anthropic SDK; every other registered provider
+    goes through the OpenAI-compatible loop against its own base_url.
+    """
     config = get_provider(provider)
+    model = kwargs.pop("model", None)
     if config.name == CLAUDE:
-        return run_claude_agent(prompt, model=kwargs.pop("model", None), **kwargs)
-    return run_openai_agent(prompt, model=kwargs.pop("model", None), **kwargs)
+        return run_claude_agent(prompt, model=model, **kwargs)
+    return run_openai_agent(prompt, provider=config.name, model=model, **kwargs)
 
 
 if __name__ == "__main__":
