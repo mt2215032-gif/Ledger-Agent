@@ -1,0 +1,10 @@
+# Runtime
+pandas>=2.0
+streamlit>=1.30
+openai>=1.0
+langchain>=1.0
+langchain-core>=1.0
+langchain-openai>=1.0
+
+# Tests
+pytest>=8.0
